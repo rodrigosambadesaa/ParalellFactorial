@@ -1,3 +1,5 @@
+package programas;
+
 // Original implementation: https://stackoverflow.com/a/74143513
 // Posted by Rodrigo and modified by the Stack Overflow community.
 // Retrieved 2026-09-15 under CC BY-SA 4.0.
@@ -264,6 +266,8 @@ public final class ParalellFactorial {
      * Parallel product tree split by estimated result bit size.
      */
     private static final class PrimeProductTask extends RecursiveTask<BigInteger> {
+        private static final long serialVersionUID = 1L;
+
         private final PrimeData data;
         private final int from;
         private final int to;
@@ -351,6 +355,8 @@ public final class ParalellFactorial {
      * Exact fallback whose range boundaries remain arbitrary-size integers.
      */
     private static final class BigRangeProductTask extends RecursiveTask<BigInteger> {
+        private static final long serialVersionUID = 1L;
+
         private final BigInteger start;
         private final BigInteger end;
 
