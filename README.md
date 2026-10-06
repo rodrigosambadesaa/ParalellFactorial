@@ -1,9 +1,7 @@
 # Parallel Factorial
 
-Java 17/Eclipse project with two complementary high-performance implementations:
-
-- exact integer factorial using parallel Prime Swing;
-- certified arbitrary-precision factorial for decimal and complex arguments.
+Java 17/Eclipse factorial project with native high-performance arithmetic,
+pure-Java fallback and certified complex continuation.
 
 ## Exact integer factorial
 
@@ -11,30 +9,48 @@ Java 17/Eclipse project with two complementary high-performance implementations:
 BigInteger result = ParalellFactorial.factorial(n);
 ```
 
-For practical `int`-sized inputs the implementation uses an odd-only prime
-sieve and the Prime Swing recurrence:
+For inputs of at least 100,000, the Java front end delegates to
+`fmpz_fac_ui` from FLINT/GMP and imports the result as a binary magnitude.
+This uses optimized native factorial and multiplication algorithms instead of
+attempting to compete with Mathematica from `java.math.BigInteger`.
+
+If Python or `python-flint` is unavailable, the same API falls back to an
+independent parallel Prime Swing implementation with:
 
 ```text
 odd(n!) = odd(floor(n/2)!)² × swing(n)
 n!      = odd(n!) × 2^(n - bitCount(n))
 ```
 
-Swing factors and final products are multiplied through balanced
-`ForkJoinPool` trees. This avoids the increasingly unbalanced `BigInteger ×
-small integer` sequence of the elementary loop and lets `BigInteger` use its
-fast multiplication algorithms. Inputs beyond `Integer.MAX_VALUE` retain an
-exact `BigInteger` divide-and-conquer fallback, although such results are far
-beyond ordinary machine resources.
+Prime Swing is exact and substantially better than an elementary loop, but the
+native backend is dramatically faster for giant inputs because Java
+`BigInteger` multiplication and decimal conversion become the bottleneck.
 
-The implementation follows the Prime Swing formulation documented by Peter
-Luschny and the factorial algorithm notes in GNU MP; it is independently
-implemented for this project.
+### Direct decimal output
 
-Run:
+Do not call `BigInteger.toString()` for hundreds of millions of digits. The
+optimized command calculates, converts and writes through FLINT/GMP:
 
-```text
-programas.ParalellFactorial
+```bash
+java -cp target/classes programas.ParalellFactorial 30000000 factorial-30000000.txt
 ```
+
+Interactive calculations of at least 1,000,000 are also redirected to a file
+automatically instead of flooding the Eclipse console.
+
+### Measured `30000000!` benchmark
+
+Same 9-vCPU, 9.7-GiB environment, Java 17:
+
+| Operation | Pure Java Prime Swing | FLINT/GMP backend |
+| --- | ---: | ---: |
+| Exact factorial | 500.31 s | 9.40 s |
+| Decimal conversion | 1612.46 s | 48.83 s |
+| Exact result size | 701,872,938 bits | 701,872,938 bits |
+| Decimal digits | 211,284,808 | 211,284,808 |
+
+The Java API verifies the native binary or decimal payload with SHA-256 before
+accepting it.
 
 ## Certified complex factorial
 
@@ -44,8 +60,7 @@ The analytic continuation is:
 z! = Gamma(z + 1)
 ```
 
-The Java API keeps every decimal input digit as text and asks FLINT/Arb to
-evaluate Gamma with arbitrary-precision complex ball arithmetic:
+FLINT/Arb evaluates Gamma using arbitrary-precision complex ball arithmetic:
 
 ```java
 ComplexFactorial.CertifiedResult result =
@@ -56,24 +71,21 @@ String imaginary = result.imaginary();
 String checksum = result.sha256();
 ```
 
-The worker starts with 64 guard digits and automatically doubles them if the
-rigorous interval does not yet determine a unique requested rounding. Java
-accepts the answer only when both endpoints round identically and the SHA-256
-digest also matches.
+Every decimal input is converted to an exact rational without passing through
+`double`. The worker starts with 64 guard digits and doubles them adaptively
+until both endpoints of each rigorous interval round to the same requested
+decimal result. Java then verifies the SHA-256 digest.
 
-The components are returned as decimal strings, avoiding the fixed `int`
-precision ceiling of `MathContext`. The request is a positive `long`; there is
-no small application-configured ceiling, though every real calculation is
-bounded by time, memory and the underlying JVM/Python/FLINT data structures.
+The decimal components are strings, avoiding the fixed `int` precision ceiling
+of `MathContext`. The precision request is a positive `long`; practical limits
+remain memory, execution time and the underlying JVM/Python/FLINT structures.
 
-Command-line example:
-
-```text
-programas.ComplexFactorial 1.1i 100000 factorial-1.1i-100000.txt
+```bash
+java -cp target/classes programas.ComplexFactorial \
+  1.1i 100000 factorial-1.1i-100000.txt
 ```
 
-Accepted inputs include `3.5`, `2i`, `-i`, `3.5-2.25i` and scientific
-notation. Both `1.1i` and `1,1i` are accepted. Negative integers are rejected
+Both decimal point and comma are accepted. Negative integers are rejected
 because Gamma has poles there.
 
 ## Requirements and Eclipse
@@ -83,20 +95,20 @@ because Gamma has poles there.
 - Eclipse JDT and Maven Integration (`m2e`)
 - Maven outside Eclipse
 
-Install the numerical backend once:
+Install FLINT/GMP/Arb through the pinned wheel:
 
 ```bash
 python3 -m pip install -r requirements.txt
 ```
 
-Import with **File → Import → Maven → Existing Maven Projects**, select this
-repository and run either main class as a Java application. Set `PYTHON` when
-the desired executable is not named `python3` or `python`; set
-`FACTORIAL_THREADS` to override Arb's default of at most eight threads.
+Import with **File → Import → Maven → Existing Maven Projects**. Set `PYTHON`
+when the desired executable is not named `python3` or `python`, and optionally
+set `FACTORIAL_THREADS` to override the default of at most eight threads.
 
 ## Verification
 
-`mvn verify` checks Prime Swing against an independent sequential reference
-for every value from 0 through 2,000, validates `10000!`, exercises malformed
-input handling and tests decimal-complex parsing. GitHub Actions additionally
-runs a certified complex smoke calculation.
+`mvn verify` compares Prime Swing with an independent sequential implementation
+from 0 through 2,000, validates `10000!`, tests native binary and decimal
+transfer when FLINT is installed, checks malformed inputs and exercises the
+complex parser. GitHub Actions installs the pinned backend and runs both exact
+and certified-complex smoke calculations.
