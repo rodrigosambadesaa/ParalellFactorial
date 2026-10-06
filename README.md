@@ -1,19 +1,34 @@
 # Parallel Factorial
 
-Java 17 calculator providing two complementary factorial implementations:
+Java 17/Eclipse project with two complementary high-performance implementations:
 
-- an exact `BigInteger` implementation for non-negative integers;
-- an arbitrary-precision analytic continuation for real and complex decimal arguments.
+- exact integer factorial using parallel Prime Swing;
+- certified arbitrary-precision factorial for decimal and complex arguments.
 
-## Exact integer implementation
-
-The integer API accepts and returns `BigInteger`:
+## Exact integer factorial
 
 ```java
 BigInteger result = ParalellFactorial.factorial(n);
 ```
 
-For practical inputs, it factors the result into prime powers and multiplies them through a weight-balanced parallel product tree using `ForkJoinPool`. Inputs greater than `Integer.MAX_VALUE` use an exact divide-and-conquer fallback whose boundaries remain `BigInteger`.
+For practical `int`-sized inputs the implementation uses an odd-only prime
+sieve and the Prime Swing recurrence:
+
+```text
+odd(n!) = odd(floor(n/2)!)² × swing(n)
+n!      = odd(n!) × 2^(n - bitCount(n))
+```
+
+Swing factors and final products are multiplied through balanced
+`ForkJoinPool` trees. This avoids the increasingly unbalanced `BigInteger ×
+small integer` sequence of the elementary loop and lets `BigInteger` use its
+fast multiplication algorithms. Inputs beyond `Integer.MAX_VALUE` retain an
+exact `BigInteger` divide-and-conquer fallback, although such results are far
+beyond ordinary machine resources.
+
+The implementation follows the Prime Swing formulation documented by Peter
+Luschny and the factorial algorithm notes in GNU MP; it is independently
+implemented for this project.
 
 Run:
 
@@ -21,73 +36,67 @@ Run:
 programas.ParalellFactorial
 ```
 
-## Arbitrary-precision real and complex implementation
+## Certified complex factorial
 
-For non-integer and complex arguments, the program evaluates:
+The analytic continuation is:
 
 ```text
-z! = Gamma(z + 1) = exp(LogGamma(z + 1))
+z! = Gamma(z + 1)
 ```
 
-The API receives a `BigComplex` and an explicit decimal precision:
+The Java API keeps every decimal input digit as text and asks FLINT/Arb to
+evaluate Gamma with arbitrary-precision complex ball arithmetic:
 
 ```java
-MathContext context = new MathContext(200, RoundingMode.HALF_EVEN);
-BigComplex z = BigComplex.valueOf(
-        BigDecimal.ZERO,
-        BigDecimalMath.toBigDecimal("1.111111111111111111111111111111111111111")
-);
+ComplexFactorial.CertifiedResult result =
+        ComplexFactorial.factorial("1.1i", 100_000L);
 
-BigComplex result = ComplexFactorial.factorial(z, context);
+String real = result.real();
+String imaginary = result.imaginary();
+String checksum = result.sha256();
 ```
 
-Run:
+The worker starts with 64 guard digits and automatically doubles them if the
+rigorous interval does not yet determine a unique requested rounding. Java
+accepts the answer only when both endpoints round identically and the SHA-256
+digest also matches.
+
+The components are returned as decimal strings, avoiding the fixed `int`
+precision ceiling of `MathContext`. The request is a positive `long`; there is
+no small application-configured ceiling, though every real calculation is
+bounded by time, memory and the underlying JVM/Python/FLINT data structures.
+
+Command-line example:
 
 ```text
-programas.ComplexFactorial
+programas.ComplexFactorial 1.1i 100000 factorial-1.1i-100000.txt
 ```
 
-Accepted console formats include:
+Accepted inputs include `3.5`, `2i`, `-i`, `3.5-2.25i` and scientific
+notation. Both `1.1i` and `1,1i` are accepted. Negative integers are rejected
+because Gamma has poles there.
 
-```text
-3.5
-2i
--i
-3.5+2.25i
-3.5-2.25i
-1e-20+2e-5i
-```
-
-The parser never converts through `double`. Very long decimal components are read with `BigDecimalMath.toBigDecimal(String)`.
-
-### Numerical method
-
-- `BigComplex`, elementary complex functions and arbitrary-precision decimal operations come from `ch.obermuhlner:big-math:2.3.2`.
-- `LogGamma` is evaluated using recurrence and Stirling's asymptotic expansion.
-- Bernoulli numbers use an incremental Akiyama-Tanigawa cache with an extended internal `MathContext`.
-- Negative integers are rejected because `Gamma(z + 1)`, and therefore `z!`, has poles there.
-
-## Requirements
+## Requirements and Eclipse
 
 - Java 17 or newer
-- Eclipse IDE with Java Development Tools and Maven Integration for Eclipse (`m2e`)
-- Maven, when building outside Eclipse
+- Python 3
+- Eclipse JDT and Maven Integration (`m2e`)
+- Maven outside Eclipse
 
-The external dependency is declared in `pom.xml` and downloaded from Maven Central.
+Install the numerical backend once:
 
-## Import into Eclipse
+```bash
+python3 -m pip install -r requirements.txt
+```
 
-1. Open **File -> Import**.
-2. Select **Maven -> Existing Maven Projects**.
-3. Select the cloned repository as the root directory.
-4. Choose `ParalellFactorial` and finish the import.
-5. If necessary, select **Maven -> Update Project** from the project's context menu.
-6. Run either main class as a Java application.
+Import with **File → Import → Maven → Existing Maven Projects**, select this
+repository and run either main class as a Java application. Set `PYTHON` when
+the desired executable is not named `python3` or `python`; set
+`FACTORIAL_THREADS` to override Arb's default of at most eight threads.
 
-## Precision and practical limits
+## Verification
 
-"Arbitrary precision" means that the caller chooses a finite number of significant decimal digits. A transcendental complex result generally has infinitely many non-repeating digits, so no program can return all of them.
-
-Input length and requested precision are not restricted to `double` numeric precision, but Java ultimately remains limited by available memory, execution time, `BigDecimal` scale and array-size limits. The precision itself is a positive `int`, as required by `MathContext`.
-
-The exact integer factorial is limited by the memory needed to store and print the result. The complex continuation is limited by the requested finite precision and the numerical cost of the transcendental operations.
+`mvn verify` checks Prime Swing against an independent sequential reference
+for every value from 0 through 2,000, validates `10000!`, exercises malformed
+input handling and tests decimal-complex parsing. GitHub Actions additionally
+runs a certified complex smoke calculation.
