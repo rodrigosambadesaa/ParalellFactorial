@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+# CVE-2026-114938: mitigate the vulnerable JDK Base64 intrinsic in CI.
+env:
+  JAVA_TOOL_OPTIONS: -XX:-UseBASE64Intrinsics
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,6 +21,11 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: maven
+      - name: Check effective Java4Shell JVM workaround
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -XX:+PrintFlagsFinal -version 2>&1 | grep -E 'UseBASE64Intrinsics[[:space:]]+=[[:space:]]+false'
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
